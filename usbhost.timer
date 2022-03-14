@@ -1,0 +1,10 @@
+[Timer]
+Unit=usbhost.service
+OnBootSec=10s
+OnUnitActiveSec=1min
+
+[Install]
+WantedBy=timers.target
+
+[Unit]
+Description=Set USB port to host
