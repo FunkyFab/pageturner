@@ -1,8 +1,0 @@
-[Unit]
-Description=USB to host service
-After=network.target
-[Service]
-ExecStart=bash -c 'echo host >  /sys/kernel/debug/ci_hdrc.0/role'
-Type=oneshot
-[Install]
-WantedBy=timers.target
