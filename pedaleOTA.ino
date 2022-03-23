@@ -13,14 +13,16 @@
 #include <WiFiMulti.h>
 #include <ArduinoOTA.h>
 #include <Adafruit_NeoPixel.h>
-#define MULTI_TASK
+
 #include "secrets.h"
 
+//Multasking for starting the network => makes the device being ready in 500ms
+#define MULTI_TASK
 
 #define PEDAL1          33
 #define PEDAL2          35
-//Time for which we ignore the interrupt after another one
-#define IDLE_TIME       500
+//Time for which we ignore two rising signals (debouncing)
+#define IDLE_TIME       200
 
 
 #define LED_PIN         18
@@ -29,9 +31,9 @@
 
 USBHIDKeyboard Keyboard;
 WiFiMulti wifiMulti;
-
 Adafruit_NeoPixel pixels(1, LED_PIN, NEO_GRB + NEO_KHZ800);
 long lastEvent;
+byte previousRead1 = HIGH, previousRead2 = HIGH;
 
 struct Pedal {
   const uint8_t PIN;
@@ -42,6 +44,7 @@ struct Pedal {
 Pedal pedal1 = {PEDAL1, false, 0};
 Pedal pedal2 = {PEDAL2, false, 0};
 
+
 void ledRgb(byte red, byte green, byte blue) {
   pixels.setBrightness(LED_BRIGHTNESS);
   pixels.setPixelColor(0, red, green, blue);
@@ -51,19 +54,6 @@ void ledRgb(byte red, byte green, byte blue) {
 void ledOff() {
   pixels.setBrightness(0);
   pixels.show();
-}
-
-//Interruption: called when a pedal is pressed
-void IRAM_ATTR isr(void* arg) {
-  Pedal* s = static_cast<Pedal*>(arg);
-  long now = millis();
-  if ( now - s->timestamp > IDLE_TIME ) {
-    //Just raising a flag here, not sending any keykoard stroke
-    //Because an interrupt must be as small as possible
-    Serial.printf("Interrupt on %d\n", s->PIN);
-    s->pressed = true;
-    s->timestamp = now;
-  }
 }
 //Called from setup() to initiate Wifi connection.
 //Used only for OTA updates
@@ -78,6 +68,7 @@ void setupWifi() {
   }
   ledRgb(128, 255, 0);
   lastEvent = millis();
+  Serial.println("Connected");
 }
 //Called from setup() to unable OTA update
 void setupOTA() {
@@ -125,18 +116,20 @@ boolean checkWifi() {
   WiFi.mode(WIFI_STA);
   Serial.println("Scanning Wifi");
   int n = WiFi.scanNetworks();
-  Serial.println("Scan done");
   if (n == 0) {
     Serial.println("No networks found");
   } else {
     for (int i = 0; i < n; ++i) {
       //Found proper Wifi SSID
-      if ((String(SSID_1) == WiFi.SSID(i)) || (String(SSID_2) == WiFi.SSID(i)))
+      if ((String(SSID_1) == WiFi.SSID(i)) || (String(SSID_2) == WiFi.SSID(i))) {
+        
         return true;
+      }
     }
   }
   ledRgb( 255, 80, 0);
   lastEvent = millis();
+  Serial.println("Wifi connection dropped");
   return false;
 }
 
@@ -188,47 +181,54 @@ void setup() {
   Serial.begin(115200);
   Serial.println("Let's start");
   setupLed();
-
   USB.begin();
-  Serial.println("USB begun");
   Keyboard.begin();
-  Serial.println("Keyboard begun");
-  Serial.printf("Set pin %d as input\n", PEDAL1);
   //Configuring the pin to be an input, with resistor pull-up enabled
   pinMode(PEDAL1, INPUT_PULLUP);
   //Configuring the pin to be an input, with resistor pull-up enabled;
   Serial.printf("Set pin %d as input\n", PEDAL2);
   pinMode(PEDAL2, INPUT_PULLUP);
-  Serial.println("Positionning interrupts");
-  //When a falling signal is detected, call the isr function
-  attachInterruptArg(pedal1.PIN, isr, &pedal1, FALLING);
-  attachInterruptArg(pedal2.PIN, isr, &pedal2, FALLING);
   setupNetwork();
   ledOff();
 }
 
 void loop() {
-  if (pedal1.pressed) {
-    if (!pedal2.pressed) {
-      pedal1.pressed = false;
-      pedal2.pressed = false;
-      Serial.println("Previous");
-      Keyboard.write(KEY_LEFT_ARROW);
-      ledRgb( 0, 0, 255);
-      lastEvent = millis();
-    }
+  //Only capture HIGH->LOW transition
+  byte currentRead1 = digitalRead(PEDAL1);
+  byte currentRead2 = digitalRead(PEDAL2);
+  long now = millis();
+  if (( currentRead1 == LOW ) && (previousRead1 == HIGH) && ( now - pedal1.timestamp > IDLE_TIME ))  {
+    pedal1.pressed = true;
+    pedal1.timestamp = now;
   }
-  if (pedal2.pressed) {
-    pedal2.pressed = false;
+  if (( currentRead2 == LOW ) && (previousRead2 == HIGH) && ( now - pedal2.timestamp > IDLE_TIME ))  {
+    pedal2.pressed = true;
+    pedal2.timestamp = now;
+  }
+  if ( pedal1.pressed && pedal2.pressed) {
     pedal1.pressed = false;
-    Serial.println("Next");
-    Keyboard.write(KEY_RIGHT_ARROW);
-    ledRgb( 0, 255, 0);
-    lastEvent = millis();
+    pedal2.pressed = false;
+    ledRgb( 255, 0, 0);
+    lastEvent = now;
+  } else {
+    if (pedal1.pressed) {
+      pedal1.pressed = false;
+      ledRgb( 0, 255, 0);
+      lastEvent = now;
+      Keyboard.write(KEY_RIGHT_ARROW);
+    }
+    if (pedal2.pressed) {
+      pedal2.pressed = false;
+      ledRgb( 0, 0, 255);
+      lastEvent = now;
+      Keyboard.write(KEY_LEFT_ARROW);
+    }
   }
   if ( millis() - lastEvent > DELAY_LED_OFF ) {
     ledOff();
   }
+  previousRead1 = currentRead1;
+  previousRead2 = currentRead2;
 #ifndef MULTI_TASK
   ArduinoOTA.handle();
 #endif
