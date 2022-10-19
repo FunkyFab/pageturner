@@ -1,3 +1,7 @@
+# Warning
+This no longer works after version 2.15 of the reMarkable2 software.
+I had to revert to 2.14 to make it work. 
+More info on the revert process here: https://github.com/ddvk/remarkable-update
 # PageTurner
 An ESP32-based project for turning pages on a tablet when a pedal is pressed
 
